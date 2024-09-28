@@ -1,23 +1,36 @@
-############# STAGE 1 #############
+# --- builder ---
+FROM golang:1.22 as builder
 
-FROM golang:1.22.5-alpine AS builder
+ARG BUILD_VERSION
+ARG BUILD_LAST_COMMIT
 
-WORKDIR /app
+RUN mkdir /app
+RUN mkdir /app/rueidis-test
 
-COPY go.mod go.sum ./
+WORKDIR /app/rueidis-test
 
+COPY go.mod /app/rueidis-test/go.mod
+COPY go.sum /app/rueidis-test/go.sum
+
+RUN go env
+RUN go env -w CGO_ENABLED=0
 RUN go mod download
 
-COPY . ./
+COPY . /app/rueidis-test
 
-RUN go build -ldflags="-w -s" -o main
+RUN go build \
+    -a \
+    -o "release/main" \
+    "./main.go"
 
-############# STAGE 2 #############
+# --- runner ---
+FROM debian as runner
 
-FROM gcr.io/distroless/static
+RUN apt update && apt upgrade -y && apt install -y ca-certificates curl && update-ca-certificates
 
-WORKDIR /app
+COPY --from=builder /app/rueidis-test/release/main /app/rueidis-test/release/main
 
-COPY --from=builder /app/main ./
+RUN mkdir -p /usr/local/bin
+RUN ln -s /app/rueidis-test/release/main /usr/local/bin/rueidis-test
 
-ENTRYPOINT ["/app/main"]
+CMD [ "/usr/local/bin/rueidis-test" ]

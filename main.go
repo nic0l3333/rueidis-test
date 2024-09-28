@@ -2,37 +2,46 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
-	"net/url"
+	"net"
 	"os"
+	"time"
 
 	"github.com/redis/rueidis"
+	"github.com/redis/rueidis/rueidisotel"
 )
 
 func main() {
-	redisURL, err := url.Parse(os.Getenv("REDIS_URL"))
-	if err != nil {
-		fmt.Println("error parsing redis URL:", err)
-		os.Exit(1)
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort := os.Getenv("REDIS_PORT")
+	tlsEnabled := os.Getenv("REDIS_TLS_ENABLED")
+	username := os.Getenv("REDIS_USERNAME")
+	password := os.Getenv("REDIS_PASSWORD")
+	clientCacheEnabled := os.Getenv("REDIS_CLIENT_CACHE_ENABLED")
+
+	var tlsConfig *tls.Config
+	if tlsEnabled == "1" || tlsEnabled == "true" {
+		tlsConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
 	}
 
-	redisHostPort := redisURL.Host
-	redisUsername := redisURL.User.Username()
-	redisPassword, _ := redisURL.User.Password()
-
-	client, err := rueidis.NewClient(rueidis.ClientOption{
-		InitAddress: []string{redisHostPort},
-		Username:    redisUsername,
-		Password:    redisPassword,
+	client, err := rueidisotel.NewClient(rueidis.ClientOption{
+		TLSConfig:    tlsConfig,
+		Username:     username,
+		Password:     password,
+		InitAddress:  []string{net.JoinHostPort(redisHost, redisPort)},
+		SelectDB:     int(0),
+		DisableCache: !(clientCacheEnabled == "1" || clientCacheEnabled == "true"),
 	})
 	if err != nil {
-		fmt.Println("error connecting to redis:", err)
+		fmt.Println("error creating client:", err)
 		os.Exit(1)
 	}
 
-	defer client.Close()
-
-	ctx := context.Background()
+	ctx, cancel1 := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel1()
 
 	if err := client.Do(ctx, client.B().Ping().Build()).Error(); err != nil {
 		fmt.Println(err)
@@ -41,10 +50,16 @@ func main() {
 		fmt.Println("db ping successful")
 	}
 
+	ctx, cancel2 := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel2()
+
 	if err := client.Do(ctx, client.B().Set().Key("key").Value("val").Build()).Error(); err != nil {
 		fmt.Println("error setting key:", err)
 		os.Exit(1)
 	}
+
+	ctx, cancel3 := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel3()
 
 	v, err := client.Do(ctx, client.B().Get().Key("key").Build()).ToString()
 	if err != nil {
